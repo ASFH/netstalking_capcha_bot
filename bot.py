@@ -20,14 +20,6 @@ def show_keyboard(chat_id):
     
     return keyboard
 
-@bot.message_handler(commands=['start', 'help'])
-def test_func(message):
-    print(MESSAGES_LIST)
-    for i in MESSAGES_LIST:
-        print(MESSAGES_LIST)
-        print(i)
-        bot.send_message(chat_id=CHAT_ID, text=str(i))
-
 @bot.message_handler(commands=['cleanup'])
 def cleanup_messages(message):
     print(UNSAFE_MESSAGES)
@@ -36,7 +28,6 @@ def cleanup_messages(message):
             for msg_id in messages:
                 print("removing message", msg_id, "from user", uid)
                 bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
-        MESSAGES_LIST.clear()
     else:
         bot.send_message(chat_id=CHAT_ID, text="Нечего чистить")
 
