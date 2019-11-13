@@ -1,4 +1,4 @@
-from config import TOKEN, TESTS, TOCHKA_CHAT
+from config import TOKEN, TOCHKA_CHAT
 import telebot
 import time
 import random
