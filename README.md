@@ -1,1 +1,1 @@
-# netstalking_capcha_bot
+# netstalking_captcha_bot
