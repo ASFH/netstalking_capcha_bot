@@ -1,4 +1,4 @@
-from config import TOKEN, TESTS, chat_for_capcha_bot, asdasda
+from config import TOKEN, TESTS, TOCHKA_CHAT
 import telebot
 import time
 import random
@@ -8,15 +8,13 @@ from tinydb import TinyDB, Query
 db = TinyDB('users.json')
 User = Query()
 bot = telebot.TeleBot(TOKEN)
-
-CHAT_ID = asdasda
 # dict {uid: [msg_id, ..]}
 UNSAFE_MESSAGES = dict()
 CAPTCHA_TIMEOUT = 20 # seconds
 LIMIT = 5
 ADMINS = list()
 
-for i in bot.get_chat_administrators(CHAT_ID):
+for i in bot.get_chat_administrators(TOCHKA_CHAT):
     ADMINS.append(i.user.id)
 
 print(ADMINS)
@@ -28,13 +26,13 @@ def kick_user(uid, msg_from_bot, first_name):
     """
     time.sleep(CAPTCHA_TIMEOUT)
     if uid in UNSAFE_MESSAGES:
-        bot.kick_chat_member(CHAT_ID, uid)
+        bot.kick_chat_member(TOCHKA_CHAT, uid)
         print('User {0} kicked'.format(first_name))
-        bot.unban_chat_member(CHAT_ID, uid)
+        bot.unban_chat_member(TOCHKA_CHAT, uid)
         for msg_id in UNSAFE_MESSAGES[uid]:
             print("removing message", msg_id, "from user", uid)
-            bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
-        bot.delete_message(CHAT_ID, msg_from_bot)
+            bot.delete_message(chat_id=TOCHKA_CHAT, message_id=msg_id)
+        bot.delete_message(TOCHKA_CHAT, msg_from_bot)
         print('removing message {0} from bot'.format(msg_from_bot))
         del(UNSAFE_MESSAGES[uid])
 
@@ -57,13 +55,13 @@ def cleanup_messages(message):
             for uid, messages in UNSAFE_MESSAGES.items():
                 for msg_id in messages:
                     print("removing message", msg_id, "from user", uid)
-                    bot.delete_message(chat_id=CHAT_ID, message_id=msg_id)
+                    bot.delete_message(chat_id=TOCHKA_CHAT, message_id=msg_id)
         else:
-            bot.send_message(chat_id=CHAT_ID, text="Нечего чистить")
+            bot.send_message(chat_id=TOCHKA_CHAT, text="Нечего чистить")
     else:
         if message.from_user.id in UNSAFE_MESSAGES:
             if len(UNSAFE_MESSAGES[message.from_user.id]) >= LIMIT:
-                bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
+                bot.delete_message(chat_id=TOCHKA_CHAT, message_id=message.message_id)
             else:
                 UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
         
@@ -73,18 +71,18 @@ def on_user_joins(m):
     """
         sends notification message to each joined user and triggers `kick_user`
     """
-    def _gen_captcha_text(name, uid):
+    def _gen_captcha_text(user):
         _captcha_text = ("[{0}](tg://user?id={1}), please, press the button below within the time amount"
                          " specified, otherwise you will be kicked. Thank you! ({2} sec)")
-        return _captcha_text.format(name, uid, CAPTCHA_TIMEOUT)
-    if len(db.search(User.user_id == m.from_user.id)) == 0:
+        return _captcha_text.format(user.first_name, user.id, CAPTCHA_TIMEOUT)
+    if not db.search(User.user_id == m.from_user.id):
         if m.from_user.id not in UNSAFE_MESSAGES: 
             UNSAFE_MESSAGES[m.from_user.id] = [m.message_id]
             name = m.from_user.first_name if m.from_user.first_name != None else m.from_user.username
             uid = m.from_user.id
             msg_from_bot = bot.send_message(
-                CHAT_ID,
-                _gen_captcha_text(name, uid),
+                TOCHKA_CHAT,
+                _gen_captcha_text(m.from_user),
                 parse_mode='Markdown',
                 reply_markup=show_captcha_keyboard()
             )
@@ -97,7 +95,7 @@ def answer(message):
         processes new messages; if correct answer was given, removes uid from UNSAFE_MESSAGES
     """
     if message.from_user.id in UNSAFE_MESSAGES and message.data == 'robot':
-        bot.delete_message(CHAT_ID, message.message.message_id)
+        bot.delete_message(TOCHKA_CHAT, message.message.message_id)
         del(UNSAFE_MESSAGES[message.from_user.id])
         print(UNSAFE_MESSAGES)
         db.insert(
@@ -115,7 +113,7 @@ def get_user_messages(message):
     """
     if message.from_user.id in UNSAFE_MESSAGES:
         if len(UNSAFE_MESSAGES[message.from_user.id]) >= LIMIT:
-            bot.delete_message(chat_id=CHAT_ID, message_id=message.message_id)
+            bot.delete_message(chat_id=TOCHKA_CHAT, message_id=message.message_id)
         else:
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
 
