@@ -71,7 +71,7 @@ def on_user_joins(m):
         sends notification message to each joined user and triggers `kick_user`
     """
     def _gen_captcha_text(user):
-        _captcha_text = ("[{0}](tg://user?id={1}), пожалуйста, нажмите кнопку ниже в течение указанного времени,"
+        _captcha_text = ("[{0}](tg://user?id={1}), пожалуйста, нажмите кнопку ниже в течении указанного времени,"
                          " в противном случае вы будете кикнуты. Спасибо! ({2} sec)")
         return _captcha_text.format(user.first_name, user.id, CAPTCHA_TIMEOUT)
 
