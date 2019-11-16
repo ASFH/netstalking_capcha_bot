@@ -5,7 +5,7 @@ import random
 import threading
 from tinydb import TinyDB, Query
 
-db = TinyDB('users.json')
+db = TinyDB('test.json')
 User = Query()
 bot = telebot.TeleBot(TOKEN)
 # dict {uid: [msg_id, ..]}
@@ -71,8 +71,12 @@ def on_user_joins(m):
         sends notification message to each joined user and triggers `kick_user`
     """
     def _gen_captcha_text(user):
-        _captcha_text = ("[{0}](tg://user?id={1}), хоп-хей! докажи, что ты не бот и нажми, пожалуйста, кнопку в течение указанного времени."
-                         " Боты будут кикнуты. Спасибо! ({2} sec)")
+        if user.language_code == "ru":
+            _captcha_text = ("[{0}](tg://user?id={1}), хоп-хей! Докажи, что ты не бот и нажми, пожалуйста, кнопку в течение указанного времени."
+                            " Боты будут кикнуты. Спасибо! ({2} sec)")
+        else:
+            _captcha_text = ("[{0}](tg://user?id={1}), howdy-ho! Prove you're not a bot and please press the button within the specified time."
+                            " The bots will be kicked. Thank you! ({2} sec)")
         return _captcha_text.format(user.first_name, user.id, CAPTCHA_TIMEOUT)
 
     if not db.search(User.user_id == m.from_user.id):
