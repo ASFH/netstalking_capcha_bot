@@ -1,0 +1,4 @@
+# TG bot token
+TOKEN = "1234:wxyz"
+# chat to get admins list
+CHAT_ID = -1234
