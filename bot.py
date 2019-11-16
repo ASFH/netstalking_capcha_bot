@@ -5,7 +5,7 @@ import random
 import threading
 from tinydb import TinyDB, Query
 
-db = TinyDB('test.json')
+db = TinyDB('users.json')
 User = Query()
 bot = telebot.TeleBot(TOKEN)
 # dict {uid: [msg_id, ..]}
