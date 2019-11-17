@@ -9,16 +9,16 @@ import time
 import telebot
 from tinydb import TinyDB, Query
 # local:
-from config import TOKEN, CHAT_ID
+import config
 
-DB = TinyDB('users.json')
+DB = TinyDB(config.USERS_DB)
 User = Query()  #pylint: disable=invalid-name
-BOT = telebot.TeleBot(TOKEN)
+BOT = telebot.TeleBot(config.TOKEN)
 # dict {uid: [msg_id, ..]}
 UNSAFE_MESSAGES = dict()
 CAPTCHA_TIMEOUT = 60 # seconds
 LIMIT = 5
-ADMINS = [i.user.id for i in BOT.get_chat_administrators(CHAT_ID)]
+ADMINS = [i.user.id for i in BOT.get_chat_administrators(config.CHAT_ID)]
 print(ADMINS)
 
 def kick_user(message, msg_from_bot):
