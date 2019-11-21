@@ -5,3 +5,8 @@ CHAT_ID = -1234
 
 # TinyDB file
 USERS_DB = 'users.json'
+
+# Plotly & Orca
+ORCA_REMOTE = True
+ORCA_URL = "http://localhost:9091" # only for ORCA_REMOTE = True
+
