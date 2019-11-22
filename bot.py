@@ -3,6 +3,7 @@
 """
 
 import os
+import re
 import time
 import random
 import threading
@@ -21,16 +22,18 @@ config = yaml.safe_load('config.yaml')
 
 # setup databases
 msg_conn = sqlite3.connect(config.get('db', {}).get('messages', 'messages.db'), check_same_thread = False)
-msg_db = msg_conn.cursor()
 
-msg_db.execute("""CREATE TABLE IF NOT EXISTS messages (
-    chat_id integer, 
-    username text, 
-    msg_id integer, 
-    date text,
+msg_conn.execute("""CREATE TABLE IF NOT EXISTS messages (
+    chat_id integer,
+    user_id integer,
+    msg_id integer,
+    msg_date date,
     content_type text,
     content_data text
 )""")
+
+msg_conn.commit()
+msg_db = msg_conn.cursor()
 
 users_db = TinyDB(config.get('db', {}).get('users', 'users.json'))
 User = Query()
@@ -61,24 +64,6 @@ def get_message_content(message):
     elif message.content_type == 'voice':
         return message.voice.file_id
 
-def add_message(message):
-    """
-        checks and add every users message into sqlite.db
-    """
-    name = message.from_user.first_name
-    name += ' ' + (message.from_user.last_name if message.from_user.last_name is not None else '')
-    print(name)
-    msg_db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", 
-        (
-            message.chat.id,
-            name,
-            message.message_id, 
-            str(datetime.now()),
-            message.content_type,
-            get_message_content(message)
-        )
-    )
-    msg_conn.commit()
 
 def kick_user(message, msg_from_bot):
     """
@@ -100,35 +85,41 @@ def kick_user(message, msg_from_bot):
         print('removing message {0} from bot'.format(msg_from_bot))
         del(UNSAFE_MESSAGES[message.from_user.id])
 
-def count_users(chat_id):
+
+def count_users(period, chat=None):
     """
         count users who have wrote in period
     """
     # distinct for unique values
-    msg_db.execute("SELECT DISTINCT username FROM messages WHERE chat_id = ? AND (date BETWEEN ? AND ?)", (
-        chat_id,
-        str(datetime.now() - timedelta(hours=config.get('graphs', {}).get('period', 1))), 
-        str(datetime.now())
-        )
-    )
+    query = "SELECT DISTINCT user_id FROM messages WHERE"
+    if chat:
+        query = query + " chat_id = {} AND ".format(chat)
+    query = query + " (date BETWEEN ? AND ?)"
+    msg_db.execute(query, (datetime.now() - timedelta(hours=period), datetime.now()))
     return msg_db.fetchall()
 
-def count_by_type(chat_id, all_users, content_type=None):
-    counted = list()
-    query = "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND username = ? AND (date BETWEEN ? AND ?)"
-    if content_type is not None:
-        query = query + " AND content_type = '{}'".format(content_type) 
-    for i in all_users:
-        msg_db.execute(
-            query, (
-                chat_id,
-                i,
-                datetime.now() - timedelta(hours=config.get('graphs', {}).get('period', 1)), 
-                datetime.now()
-            )
-        )
-        counted.append(msg_db.fetchone()[0])
-    return counted
+
+def count_messages(chat=None, uid=None, content=None, period=None):
+    users = []
+    counts = []
+    query = "SELECT COUNT(*) FROM messages WHERE "
+    if not period:
+        period = config.get('graphs', {}).get('period', 1)
+    if uid:
+        users = [uid]
+        query = query + " user_id = {} AND ".format(uid)
+    else:
+        users = count_users(period, chat)
+        query = query + " user_id IN ({}) AND ".format(','.join())
+    if chat:
+        query = query + "chat_id = {} AND ".format(chat)
+    if content is not None:
+        query = query + " content_type = '{}' AND ".format(content)
+    query = query + " (date BETWEEN ? AND ?)"
+    msg_db.execute(query, (datetime.now() - timedelta(hours=period), datetime.now()))
+    counts = msg_db.fetchall()
+    return users, counts
+
 
 def show_captcha_keyboard():
     """
@@ -138,57 +129,27 @@ def show_captcha_keyboard():
     keyboard.add(telebot.types.InlineKeyboardButton(text='I\'m not a robot', callback_data='robot'))
     return keyboard
 
-@bot.message_handler(commands=['count_images'])
-def cleanup_messages(message):
+
+@bot.message_handler(commands=['count'])
+def count(message):
     """
         sends counted messages and images from users as a graph
     """
-    if 'chat1' in message.text:
-        all_users = count_users(CHAT_ID1)
-        messages_count = count_messages(CHAT_ID1, all_users)
-        images_counted = count_images(CHAT_ID1, all_users)
-        counted = Graph(all_users, messages_count, images_counted)
-        print(images_counted)
-        bot.send_photo(
-            message.from_user.id,
-            counted.get_images_stat(),
-            'Counted messages from chat: Точка Сбора'
-        )
-    elif 'chat2' in message.text:
-        all_users = count_users(CHAT_ID2)
-        messages_count = count_messages(CHAT_ID2, all_users)
-        images_counted = count_images(CHAT_ID2, all_users)
-        counted = Graph(all_users, messages_count, images_counted)
-        print(images_counted)
-        bot.send_photo(
-            message.from_user.id,
-            counted.get_images_stat(),
-            'Counted messages from chat: Точка Выхода'
-        )
+    kwargs = {
+        k: v for k, v in [
+            a.split('=') for a in re.findall(
+                r'((?:uid|chat|content|period)=[^\s]+)', message.text
+            )
+        ]
+    }
+    users, counts = count_messages(**kwargs)
+    counted = Graph(users, counts)
+    bot.send_photo(
+        message.from_user.id,
+        counted.get_stats(),
+        'Counted messages from chat: Точка Сбора'
+    )
 
-@bot.message_handler(commands=['count'])
-def cleanup_messages(message):
-    """
-        sends counted messages from users as a graph
-    """
-    if 'chat1' in message.text:
-        all_users = count_users(CHAT_ID1)
-        messages_count = count_messages(CHAT_ID1, all_users)
-        print(all_users)
-        print(messages_count)
-        users = Graph(all_users, messages_count)
-        users.get_users_stat()
-        photo = open('images/fig1.png', 'rb')
-        bot.send_photo(message.from_user.id, photo, 'Counted messages from chat: Точка Сбора')
-    elif 'chat2' in message.text:
-        all_users = count_users(CHAT_ID2)
-        messages_count = count_messages(CHAT_ID2, all_users)
-        print(all_users)
-        print(messages_count)
-        users = Graph(all_users, messages_count)
-        users.get_users_stat()
-        photo = open('images/fig1.png', 'rb')
-        bot.send_photo(message.from_user.id, photo, 'Counted messages from chat: Точка Выхода')
 
 @bot.message_handler(commands=['cleanup'])
 def cleanup_messages(message):
@@ -206,7 +167,7 @@ def cleanup_messages(message):
             bot.send_message(chat_id=message.chat.id, text="Нечего чистить")
     else:
         if message.from_user.id in UNSAFE_MESSAGES:
-            if len(UNSAFE_MESSAGES[message.from_user.id]) >= LIMIT:
+            if len(UNSAFE_MESSAGES[message.from_user.id]) >= config.get('captcha', {}).get('msg_limit', 5):
                 bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
             else:
                 UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
@@ -226,7 +187,7 @@ def on_user_joins(m):
                             " The bots will be kicked. Thank you! ({2} sec)")
         return _captcha_text.format(user.first_name, user.id, config.get('captcha', {}).get('timeout', 30))
 
-    if not db.search(User.user_id == m.from_user.id):
+    if not users_db.search(User.user_id == m.from_user.id):
         if m.from_user.id not in UNSAFE_MESSAGES: 
             UNSAFE_MESSAGES[m.from_user.id] = [m.message_id]
             name = m.from_user.first_name if m.from_user.first_name != None else m.from_user.username
@@ -240,6 +201,7 @@ def on_user_joins(m):
         thread = threading.Thread(target=kick_user, args=(m, msg_from_bot.message_id, ))
         thread.start()
 
+
 @bot.callback_query_handler(func=lambda message:True)
 def answer(message):
     """
@@ -249,15 +211,16 @@ def answer(message):
         bot.delete_message(message.message.chat.id, message.message.message_id)
         del(UNSAFE_MESSAGES[message.from_user.id])
         print(UNSAFE_MESSAGES)
-        db.insert(
+        users_db.insert(
             {'user_id': message.from_user.id, 
             'username': message.from_user.username, 
             'first_name': message.from_user.first_name, 
             'last_name': message.from_user.last_name}
         )
-        print('User {0} created'.format(db.search(User.first_name == message.from_user.first_name)[0]['first_name']))
+        print('User {0} created'.format(users_db.search(User.first_name == message.from_user.first_name)[0]['first_name']))
     else:
         bot.answer_callback_query(message.id, 'Активно только для нового пользователя')
+
 
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio', 'animation', 'voice', 'sticker', 'bot_command'])
 def get_user_messages(message):
@@ -266,11 +229,21 @@ def get_user_messages(message):
         removes those which exceed predefined LIMIT
     """
     if message.from_user.id in UNSAFE_MESSAGES:
-        if len(UNSAFE_MESSAGES[message.from_user.id]) >= LIMIT:
+        if len(UNSAFE_MESSAGES[message.from_user.id]) >= config.get('captcha', {}).get('msg_limit', 5):
             bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         else:
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
 
-    add_message(message)
+    msg_db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", 
+        (
+            message.chat.id,
+            message.from_user.id,
+            message.message_id, 
+            datetime.now(),
+            message.content_type,
+            get_message_content(message)
+        )
+    )
+    msg_conn.commit()
 
 bot.polling()

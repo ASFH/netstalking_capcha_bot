@@ -12,10 +12,9 @@ class Graph:
     """
         class for drawing graphs from user data
     """
-    def __init__(self, all_users, messages_count, images_count=None):
-        self.all_users = all_users
-        self.messages_count = messages_count
-        self.images_count = images_count
+    def __init__(self, users, counts):
+        self.users = users
+        self.counts = counts
 
         if config.get('graphs', {}).get('orca', {}).get('remote'):
             pio.orca.config.server_url = config['graphs']['orca'].get('url', 'http://localhost:9091/')
@@ -35,8 +34,8 @@ class Graph:
         return image_bytes
 
 
-    def get_users_stat(self):
-        fig = go.Figure([go.Bar(x=self.all_users, y=self.messages_count)])
+    def get_stats(self):
+        fig = go.Figure([go.Bar(x=self.users, y=self.counts)])
         return self.orca_draw(fig)
 
     def get_images_stat(self):
