@@ -102,21 +102,16 @@ def kick_user(message, msg_from_bot):
 
 def count_users(chat_id):
     """
-        count users who have wrote in 5 minutes
+        count users who have wrote in period
     """
-    msg_db.execute("SELECT * FROM messages WHERE chat_id = {0} AND (date BETWEEN '{1}' AND '{2}')".format(
+    # distinct for unique values
+    msg_db.execute("SELECT DISTINCT username FROM messages WHERE chat_id = ? AND (date BETWEEN ? AND ?)", (
         chat_id,
-        str(datetime.now() - timedelta(hours=HOURS)), 
+        str(datetime.now() - timedelta(hours=config.get('graphs', {}).get('period', 1))), 
         str(datetime.now())
-        ))
-    all = c.fetchall()
-    all_users = list()
-    for i in all: 
-        if i[1] not in all_users:
-            all_users.append(i[1])
-        else:
-            continue
-    return all_users
+        )
+    )
+    return msg_db.fetchall()
 
 def count_by_type(chat_id, all_users, content_type=None):
     counted = list()
@@ -229,7 +224,7 @@ def on_user_joins(m):
         else:
             _captcha_text = ("[{0}](tg://user?id={1}), howdy-ho! Prove you're not a bot and please press the button within the specified time."
                             " The bots will be kicked. Thank you! ({2} sec)")
-        return _captcha_text.format(user.first_name, user.id, CAPTCHA_TIMEOUT)
+        return _captcha_text.format(user.first_name, user.id, config.get('captcha', {}).get('timeout', 30))
 
     if not db.search(User.user_id == m.from_user.id):
         if m.from_user.id not in UNSAFE_MESSAGES: 
