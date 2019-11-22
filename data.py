@@ -2,9 +2,11 @@
     this module provides data-management interface
 """
 
+import yaml
 import plotly.graph_objects as go
 import plotly.io as pio
-import config
+
+config = yaml.safe_load('config.yaml')
 
 class Graph:
     """
@@ -15,26 +17,27 @@ class Graph:
         self.messages_count = messages_count
         self.images_count = images_count
 
-        if config.ORCA_REMOTE:
-            pio.orca.config.server_url = config.ORCA_URL
+        if config.get('graphs', {}).get('orca', {}).get('remote'):
+            pio.orca.config.server_url = config['graphs']['orca'].get('url', 'http://localhost:9091/')
 
     @staticmethod
-    def orca_draw(fig, to_path):
+    def orca_draw(fig, to_path=None):
         """
             renders figure using either local or remote orca
             to PNG format (which is hardcoded currently)
+            returns image as bytes
         """
-        if config.ORCA_REMOTE:
+        image_bytes = pio.to_image(fig, format='png')
+        if to_path:
             with open(to_path, 'w+b') as to_f:
                 # see to_image, it has more params
-                to_f.write(pio.to_image(fig, format='png'))
-        else:
-            fig.write_image(to_path)
+                to_f.write(image_bytes)
+        return image_bytes
 
 
     def get_users_stat(self):
         fig = go.Figure([go.Bar(x=self.all_users, y=self.messages_count)])
-        self.orca_draw(fig, 'images/fig1.png')
+        return self.orca_draw(fig)
 
     def get_images_stat(self):
         fig = go.Figure()
@@ -55,4 +58,4 @@ class Graph:
             )
         )
         fig.update_layout(barmode='group')
-        self.orca_draw(fig, 'images/fig2.png')
+        return self.orca_draw(fig)

@@ -1,91 +1,91 @@
-﻿from config import TOKEN, CHAT_ID1, CHAT_ID2
-import telebot
+﻿"""
+    entrypoint and main module with msg handlers
+"""
+
 import os
 import time
 import random
 import threading
 from threading import Lock
-from tinydb import TinyDB, Query
-import sqlite3
 from datetime import date, timedelta, datetime
+
+import yaml
+import sqlite3
+import telebot
+from tinydb import TinyDB, Query
+
 from data import Graph
 
-if not os.path.exists("images"):
-    os.mkdir("images")
 
-conn = sqlite3.connect("messages.db", check_same_thread = False)
-c = conn.cursor()
+config = yaml.safe_load('config.yaml')
 
-db = TinyDB('users.json')
+# setup databases
+msg_conn = sqlite3.connect(config.get('db', {}).get('messages', 'messages.db'), check_same_thread = False)
+msg_db = msg_conn.cursor()
+
+msg_db.execute("""CREATE TABLE IF NOT EXISTS messages (
+    chat_id integer, 
+    username text, 
+    msg_id integer, 
+    date text,
+    content_type text,
+    content_data text
+)""")
+
+users_db = TinyDB(config.get('db', {}).get('users', 'users.json'))
 User = Query()
-bot = telebot.TeleBot(TOKEN)
+
+# define bot
+bot = telebot.TeleBot(config.get('token'))
 # dict {uid: [msg_id, ..]}
 UNSAFE_MESSAGES = dict()
-CAPTCHA_TIMEOUT = 60 # seconds
-HOURS = 1
-LIMIT = 5
-ADMINS = [i.user.id for i in bot.get_chat_administrators(CHAT_ID1)]
-print(ADMINS)
-lock= Lock()
 
-'''
-"CREATE TABLE messages (chat_id integer, username text, msg_id integer, date text, photo text, 
-                        msg_text text, audio text, document text, 
-                        sticker text, video text, 
-                        voice text, location text, poll text)"
-'''
-def check_message(message):
-    message_data = []
-    if message.photo is not None:
-        message_data.append(message.photo[0].file_id)
-    else:
-        message_data.append('False')
-    if message.text is not None:      
-        message_data.append(message.text)
-    else:
-        message_data.append('False')
-    if message.audio is not None: 
-        message_data.append(message.audio.file_id)
-    else:
-        message_data.append('False')
-    if message.document is not None: 
-        message_data.append(message.document.file_id)
-    else:
-        message_data.append('False')
-    if message.sticker is not None: 
-        message_data.append(message.sticker.thumb.file_id)
-    else:
-        message_data.append('False')
-    if message.video is not None:  
-        message_data.append(message.video.file_id)
-    else:
-        message_data.append('False')
-    if message.voice is not None:  
-        message_data.append(message.voice.file_id)
-    else:
-        message_data.append('False')
-    return message_data
+# obtain admins list from CHAT_ID
+ADMINS = [i.user.id for i in bot.get_chat_administrators(config.get('adm_chat'))]
+print(ADMINS)
+
+
+def get_message_content(message):
+    if message.content_type == 'photo':
+        return message.photo[0].file_id
+    elif message.content_type == 'text':
+        return message.text
+    elif message.content_type == 'audio':
+        return message.audio.file_id
+    elif message.content_type == 'document':
+        return message.document.file_id
+    elif message.content_type == 'sticker':
+        return message.sticker.thumb.file_id
+    elif message.content_type == 'video':
+        return message.video.file_id
+    elif message.content_type == 'voice':
+        return message.voice.file_id
 
 def add_message(message):
     """
         checks and add every users message into sqlite.db
     """
-    message_data = check_message(message)
-    print(message_data)
     name = message.from_user.first_name
-    name += message.from_user.last_name if message.from_user.last_name is not None else ''
+    name += ' ' + (message.from_user.last_name if message.from_user.last_name is not None else '')
     print(name)
-    c.execute("INSERT INTO messages VALUES ({0}, '{1}', {2}, '{3}','{4}', '{5}', '{6}', '{7}', '{8}', '{9}', '{10}', '{11}', '{12}')".format(
-        message.chat.id, name, message.message_id, str(datetime.now()), message_data[0], message_data[1], message_data[2], message_data[3], message_data[4], message_data[5], message_data[6], 'False', 'False'
-    ))
-    conn.commit()
+    msg_db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", 
+        (
+            message.chat.id,
+            name,
+            message.message_id, 
+            str(datetime.now()),
+            message.content_type,
+            get_message_content(message)
+        )
+    )
+    msg_conn.commit()
 
 def kick_user(message, msg_from_bot):
     """
         executes in separate thread;
         kicks user and removes its messages after timeout if it didn't pass the exam
     """
-    time.sleep(CAPTCHA_TIMEOUT)
+    time.sleep(config.get('captcha', {}).get('timeout', 30))
     if message.from_user.id in UNSAFE_MESSAGES:
 
         bot.kick_chat_member(message.chat.id, message.from_user.id)
@@ -102,48 +102,33 @@ def kick_user(message, msg_from_bot):
 
 def count_users(chat_id):
     """
-        count users who have wrote in 5 minutes
+        count users who have wrote in period
     """
-    c.execute("SELECT * FROM messages WHERE chat_id = {0} AND (date BETWEEN '{1}' AND '{2}')".format(
+    # distinct for unique values
+    msg_db.execute("SELECT DISTINCT username FROM messages WHERE chat_id = ? AND (date BETWEEN ? AND ?)", (
         chat_id,
-        str(datetime.now() - timedelta(hours=HOURS)), 
+        str(datetime.now() - timedelta(hours=config.get('graphs', {}).get('period', 1))), 
         str(datetime.now())
-        ))
-    all = c.fetchall()
-    all_users = list()
-    for i in all: 
-        if i[1] not in all_users:
-            all_users.append(i[1])
-        else:
-            continue
-    return all_users
+        )
+    )
+    return msg_db.fetchall()
 
-def count_messages(chat_id, all_users):
-    """
-        count messages from counted users
-    """
-    messages_count = list()
+def count_by_type(chat_id, all_users, content_type=None):
+    counted = list()
+    query = "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND username = ? AND (date BETWEEN ? AND ?)"
+    if content_type is not None:
+        query = query + " AND content_type = '{}'".format(content_type) 
     for i in all_users:
-        c.execute("SELECT COUNT(*) FROM messages WHERE chat_id = {0} AND (username = '{1}') AND (date BETWEEN '{2}' AND '{3}')".format(
-            chat_id,
-            i, 
-            str(datetime.now() - timedelta(hours=HOURS)), 
-            str(datetime.now())
-        ))
-        messages_count.append(c.fetchone()[0])
-    return messages_count
-
-def count_images(chat_id, all_users):
-    images_counted = list()
-    for i in all_users:
-        c.execute("SELECT COUNT(photo) FROM messages WHERE chat_id = {0} AND (username = '{1}') AND (date BETWEEN '{2}' AND '{3}') AND (NOT photo = 'False')".format(
-            chat_id,
-            i, 
-            str(datetime.now() - timedelta(hours=HOURS)), 
-            str(datetime.now())
-        ))
-        images_counted.append(c.fetchone()[0])
-    return images_counted
+        msg_db.execute(
+            query, (
+                chat_id,
+                i,
+                datetime.now() - timedelta(hours=config.get('graphs', {}).get('period', 1)), 
+                datetime.now()
+            )
+        )
+        counted.append(msg_db.fetchone()[0])
+    return counted
 
 def show_captcha_keyboard():
     """
@@ -164,18 +149,22 @@ def cleanup_messages(message):
         images_counted = count_images(CHAT_ID1, all_users)
         counted = Graph(all_users, messages_count, images_counted)
         print(images_counted)
-        counted.get_images_stat()
-        photo = open('images/fig2.png', 'rb')
-        bot.send_photo(message.from_user.id, photo, 'Counted messages from chat: Точка Сбора')
+        bot.send_photo(
+            message.from_user.id,
+            counted.get_images_stat(),
+            'Counted messages from chat: Точка Сбора'
+        )
     elif 'chat2' in message.text:
         all_users = count_users(CHAT_ID2)
         messages_count = count_messages(CHAT_ID2, all_users)
         images_counted = count_images(CHAT_ID2, all_users)
         counted = Graph(all_users, messages_count, images_counted)
         print(images_counted)
-        counted.get_images_stat()
-        photo = open('images/fig2.png', 'rb')
-        bot.send_photo(message.from_user.id, photo, 'Counted messages from chat: Точка Выхода')
+        bot.send_photo(
+            message.from_user.id,
+            counted.get_images_stat(),
+            'Counted messages from chat: Точка Выхода'
+        )
 
 @bot.message_handler(commands=['count'])
 def cleanup_messages(message):
@@ -235,7 +224,7 @@ def on_user_joins(m):
         else:
             _captcha_text = ("[{0}](tg://user?id={1}), howdy-ho! Prove you're not a bot and please press the button within the specified time."
                             " The bots will be kicked. Thank you! ({2} sec)")
-        return _captcha_text.format(user.first_name, user.id, CAPTCHA_TIMEOUT)
+        return _captcha_text.format(user.first_name, user.id, config.get('captcha', {}).get('timeout', 30))
 
     if not db.search(User.user_id == m.from_user.id):
         if m.from_user.id not in UNSAFE_MESSAGES: 
@@ -273,7 +262,8 @@ def answer(message):
 @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio', 'animation', 'voice', 'sticker', 'bot_command'])
 def get_user_messages(message):
     """
-        processes new messages; removes those which exceed predefined LIMIT
+        processes all new messages; 
+        removes those which exceed predefined LIMIT
     """
     if message.from_user.id in UNSAFE_MESSAGES:
         if len(UNSAFE_MESSAGES[message.from_user.id]) >= LIMIT:
