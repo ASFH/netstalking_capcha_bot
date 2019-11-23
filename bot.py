@@ -153,7 +153,16 @@ def count(message):
     usernames = []
     for uid in users:
         user = USERS_DB.search(User.user_id == uid)[0]
-        usernames.append(user['first_name'] + ' ' + user['last_name'])
+        name = None
+        if user['first_name']:
+            name = user['first_name']
+            if user['last_name']:
+                name += ' ' + user['last_name']
+        elif user['username']:
+            name = user['username']
+        else:
+            name = str(uid)
+        usernames.append(name)
     counted = Graph(usernames, counts)
     BOT.send_photo(
         message.from_user.id,
