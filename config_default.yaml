@@ -1,4 +1,5 @@
 token: 1234:wxyz
+loglevel: INFO
 chats: {}
 admins_from: ts
 captcha:

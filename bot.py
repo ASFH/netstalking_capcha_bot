@@ -4,6 +4,7 @@
 
 import re
 import time
+import logging
 import threading
 from datetime import timedelta, datetime
 
@@ -13,6 +14,9 @@ from tinydb import TinyDB, Query
 
 from data import Graph
 from config import config
+
+logging.basicConfig(level=config['loglevel'].get())
+LOG = logging.getLogger(__name__)
 
 # setup databases
 MSG_CONN = sqlite3.connect(config['db']['messages'].get(str), check_same_thread=False)
@@ -70,15 +74,15 @@ def kick_user(message, msg_from_bot):
     if message.from_user.id in UNSAFE_MESSAGES:
 
         BOT.kick_chat_member(message.chat.id, message.from_user.id)
-        print('User {0} kicked'.format(message.from_user.first_name))
+        LOG.info('User %s kicked', message.from_user.first_name)
         BOT.unban_chat_member(message.chat.id, message.from_user.id)
 
         for msg_id in UNSAFE_MESSAGES[message.from_user.id]:
-            print("removing message", msg_id, "from user", message.from_user.id)
+            LOG.info("removing message %s from user %s", msg_id, message.from_user.id)
             BOT.delete_message(chat_id=message.chat.id, message_id=msg_id)
 
         BOT.delete_message(message.chat.id, msg_from_bot)
-        print('removing message {0} from bot'.format(msg_from_bot))
+        LOG.info('removing message %s from bot', msg_from_bot)
         del UNSAFE_MESSAGES[message.from_user.id]
 
 
@@ -103,7 +107,7 @@ def count_messages(chat=None, uid=None, content=None, period=None):
     counts = []
     query = "SELECT user_id, COUNT(*) FROM messages WHERE "
     if not period:
-        period = config['graphs']['period']
+        period = config['graphs']['period'].get()
     if uid:
         users = [uid]
         query = query + " user_id = {} AND ".format(uid)
@@ -115,12 +119,12 @@ def count_messages(chat=None, uid=None, content=None, period=None):
     if content is not None:
         query = query + " content_type = '{}' AND ".format(content)
     query = query + " (msg_date BETWEEN ? AND ?) GROUP BY user_id"
-    print(query)
+    LOG.debug(query)
     MSG_DB.execute(query, (datetime.now() - timedelta(hours=int(period)), datetime.now()))
     result = MSG_DB.fetchall()
     counts = [i[1] for i in result]
     users = [i[0] for i in result]
-    print(counts)
+    LOG.debug(counts)
     return users, counts
 
 
@@ -163,18 +167,18 @@ def cleanup_messages(message):
     """
         triggered manually, it cleanups all UNSAFE_MESSAGES
     """
-    print(UNSAFE_MESSAGES)
+    LOG.debug(UNSAFE_MESSAGES)
     if message.from_user.id in ADMINS:
         if UNSAFE_MESSAGES:
             for uid, messages in UNSAFE_MESSAGES.items():
                 for msg_id in messages:
-                    print("removing message", msg_id, "from user", uid)
+                    LOG.info("removing message %s from user %s", msg_id, uid)
                     BOT.delete_message(chat_id=message.chat.id, message_id=msg_id)
         else:
             BOT.send_message(chat_id=message.chat.id, text="Нечего чистить")
     else:
         if message.from_user.id in UNSAFE_MESSAGES:
-            if len(UNSAFE_MESSAGES[message.from_user.id]) >= config['captcha']['msg_limit']:
+            if len(UNSAFE_MESSAGES[message.from_user.id]) >= config['captcha']['msg_limit'].get():
                 BOT.delete_message(chat_id=message.chat.id, message_id=message.message_id)
             else:
                 UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
@@ -194,7 +198,7 @@ def new_user(message):
             _captcha_text = ("[{0}](tg://user?id={1}), howdy-ho! Prove you're not a bot "
                              "and please press the button within the specified time."
                              " The bots will be kicked. Thank you! ({2} sec)")
-        return _captcha_text.format(user.first_name, user.id, config['captcha']['timeout'])
+        return _captcha_text.format(user.first_name, user.id, config['captcha']['timeout'].get())
 
     if not USERS_DB.search(User.user_id == message.from_user.id):
         if message.from_user.id not in UNSAFE_MESSAGES:
@@ -217,18 +221,18 @@ def answer(message):
     if message.from_user.id in UNSAFE_MESSAGES and message.data == 'robot':
         BOT.delete_message(message.message.chat.id, message.message.message_id)
         del UNSAFE_MESSAGES[message.from_user.id]
-        print(UNSAFE_MESSAGES)
+        LOG.debug(UNSAFE_MESSAGES)
         USERS_DB.insert({
             'user_id': message.from_user.id,
             'username': message.from_user.username,
             'first_name': message.from_user.first_name,
             'last_name': message.from_user.last_name
         })
-        print('User {0} created'.format(
+        LOG.info('User %s created',
             USERS_DB.search(
                 User.first_name == message.from_user.first_name
             )[0]['first_name']
-        ))
+        )
     else:
         BOT.answer_callback_query(message.id, 'Активно только для нового пользователя')
 
@@ -250,7 +254,7 @@ def get_user_messages(message):
         removes those which exceed predefined LIMIT
     """
     if message.from_user.id in UNSAFE_MESSAGES:
-        if len(UNSAFE_MESSAGES[message.from_user.id]) >= config['captcha']['msg_limit']:
+        if len(UNSAFE_MESSAGES[message.from_user.id]) >= config['captcha']['msg_limit'].get():
             BOT.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         else:
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
@@ -267,8 +271,8 @@ def get_user_messages(message):
 
 
 if __name__ == "__main__":
-    for _chat in config['chats']:
-        if _chat['name'] == config['admins_from']:
+    for _chat in config['chats'].get():
+        if _chat['name'] == config['admins_from'].get():
             for admin in BOT.get_chat_administrators(_chat['id']):
                 ADMINS.append(admin.user.id)
     BOT.polling()
