@@ -15,8 +15,8 @@ class Graph:
         self.users = users
         self.counts = counts
 
-        if config['graphs']['orca']['remote']:
-            pio.orca.config.server_url = config['graphs']['orca']['url']
+        if config['graphs']['orca']['remote'].get():
+            pio.orca.config.server_url = config['graphs']['orca']['url'].get()
 
     @staticmethod
     def _orca_draw(fig, to_path=None):
