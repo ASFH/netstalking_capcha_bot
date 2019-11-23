@@ -95,7 +95,7 @@ def count_users(period, chat=None):
     if chat:
         query = query + " chat_id = {} AND ".format(chat)
     query = query + " (msg_date BETWEEN ? AND ?)"
-    MSG_DB.execute(query, (datetime.now() - timedelta(hours=period), datetime.now()))
+    MSG_DB.execute(query, (datetime.now() - timedelta(hours=int(period)), datetime.now()))
     return [i[0] for i in MSG_DB.fetchall()]
 
 
@@ -153,12 +153,12 @@ def count(message):
     usernames = []
     for uid in users:
         user = USERS_DB.search(User.user_id == uid)[0]
-        usernames.append(user['first_name'])
+        usernames.append(user['first_name'] + ' ' + user['last_name'])
     counted = Graph(usernames, counts)
     BOT.send_photo(
         message.from_user.id,
         counted.get_stats(),
-        'Counted messages from chat: Точка Сбора'
+        'Counted messages from chat: ' + (kwargs['chat'] if kwargs['chat'] else '*')
     )
 
 
@@ -228,11 +228,9 @@ def answer(message):
             'first_name': message.from_user.first_name,
             'last_name': message.from_user.last_name
         })
-        LOG.info('User %s created',
-            USERS_DB.search(
-                User.first_name == message.from_user.first_name
-            )[0]['first_name']
-        )
+        LOG.info('User %s created', USERS_DB.search(
+            User.first_name == message.from_user.first_name
+        )[0]['first_name'])
     else:
         BOT.answer_callback_query(message.id, 'Активно только для нового пользователя')
 
