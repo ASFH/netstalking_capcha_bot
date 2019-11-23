@@ -1,9 +1,10 @@
 config.yaml
-config.py
 *.pyc
 *.json
 Pipfile
 Pipfile.lock
 .vscode/
 images/*.png
-
+*.db
+*.session
+.idea/
