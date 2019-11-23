@@ -18,7 +18,7 @@ from tinydb import TinyDB, Query
 from data import Graph
 
 
-config = yaml.safe_load('config.yaml')
+config = yaml.safe_load(open('config.yaml'))
 
 # setup databases
 msg_conn = sqlite3.connect(config.get('db', {}).get('messages', 'messages.db'), check_same_thread = False)
@@ -94,15 +94,15 @@ def count_users(period, chat=None):
     query = "SELECT DISTINCT user_id FROM messages WHERE"
     if chat:
         query = query + " chat_id = {} AND ".format(chat)
-    query = query + " (date BETWEEN ? AND ?)"
+    query = query + " (msg_date BETWEEN ? AND ?)"
     msg_db.execute(query, (datetime.now() - timedelta(hours=period), datetime.now()))
-    return msg_db.fetchall()
+    return [i[0] for i in msg_db.fetchall()]
 
 
 def count_messages(chat=None, uid=None, content=None, period=None):
     users = []
     counts = []
-    query = "SELECT COUNT(*) FROM messages WHERE "
+    query = "SELECT user_id, COUNT(*) FROM messages WHERE "
     if not period:
         period = config.get('graphs', {}).get('period', 1)
     if uid:
@@ -110,14 +110,18 @@ def count_messages(chat=None, uid=None, content=None, period=None):
         query = query + " user_id = {} AND ".format(uid)
     else:
         users = count_users(period, chat)
-        query = query + " user_id IN ({}) AND ".format(','.join())
+        query = query + " user_id IN ({}) AND ".format(','.join([str(i) for i in users]))
     if chat:
         query = query + "chat_id = {} AND ".format(chat)
     if content is not None:
         query = query + " content_type = '{}' AND ".format(content)
-    query = query + " (date BETWEEN ? AND ?)"
+    query = query + " (msg_date BETWEEN ? AND ?) GROUP BY user_id"
+    print(query)
     msg_db.execute(query, (datetime.now() - timedelta(hours=period), datetime.now()))
-    counts = msg_db.fetchall()
+    result = msg_db.fetchall()
+    counts = [i[1] for i in result]
+    users = [i[0] for i in result]
+    print(counts)
     return users, counts
 
 
@@ -143,7 +147,11 @@ def count(message):
         ]
     }
     users, counts = count_messages(**kwargs)
-    counted = Graph(users, counts)
+    usernames = []
+    for uid in users:
+        user = users_db.search(User.user_id == uid)[0]
+        usernames.append(user['first_name'])
+    counted = Graph(usernames, counts)
     bot.send_photo(
         message.from_user.id,
         counted.get_stats(),

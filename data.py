@@ -6,7 +6,7 @@ import yaml
 import plotly.graph_objects as go
 import plotly.io as pio
 
-config = yaml.safe_load('config.yaml')
+config = yaml.safe_load(open('config.yaml'))
 
 class Graph:
     """
@@ -32,7 +32,6 @@ class Graph:
                 # see to_image, it has more params
                 to_f.write(image_bytes)
         return image_bytes
-
 
     def get_stats(self):
         fig = go.Figure([go.Bar(x=self.users, y=self.counts)])
