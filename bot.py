@@ -161,7 +161,7 @@ def count(message):
         elif user['username']:
             name = user['username']
         else:
-            name = str(uid)
+            name = 'id' + str(uid)
         usernames.append(name)
     counted = Graph(usernames, counts)
     BOT.send_photo(
