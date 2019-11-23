@@ -167,7 +167,7 @@ def count(message):
     BOT.send_photo(
         message.from_user.id,
         counted.get_stats(),
-        'Counted messages from chat: ' + (kwargs['chat'] if kwargs['chat'] else '*')
+        'Counted messages from chat: ' + (kwargs.get('chat') if 'chat' in kwargs else '*')
     )
 
 
