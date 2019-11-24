@@ -25,7 +25,7 @@ class Graph:
             to PNG format (which is hardcoded currently)
             returns image as bytes
         """
-        image_bytes = pio.to_image(fig, format='png')
+        image_bytes = pio.to_image(fig, format='png', width=1200, height=900)
         if to_path:
             with open(to_path, 'w+b') as to_f:
                 # see to_image, it has more params
