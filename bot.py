@@ -18,7 +18,7 @@ from config import config
 logging.basicConfig(level=config['loglevel'].get())
 LOG = logging.getLogger(__name__)
 
-LOG.info(config['chats'].get())
+LOG.debug(config['chats'].get())
 
 # setup databases
 MSG_CONN = sqlite3.connect(config['db']['messages'].get(str), check_same_thread=False)
@@ -110,16 +110,17 @@ def count_messages(chat=None, uid=None, content=None, period=None):
     query = "SELECT user_id, COUNT(*) FROM messages WHERE "
     if not period:
         period = config['graphs']['period'].get()
+    if chat:
+        chat_id = config['chats'].get().get(chat)
+        if chat_id:
+            query = query + "chat_id = {} AND ".format(chat_id)
+            chat = chat_id
     if uid:
         users = [uid]
         query = query + " user_id = {} AND ".format(uid)
     else:
         users = count_users(period, chat)
         query = query + " user_id IN ({}) AND ".format(','.join([str(i) for i in users]))
-    if chat:
-        chat_id = config['chats'].get().get(chat)
-        if chat_id:
-            query = query + "chat_id = {} AND ".format(chat)
     if content is not None:
         query = query + " content_type = '{}' AND ".format(content)
     query = query + " (msg_date BETWEEN ? AND ?) GROUP BY user_id"
