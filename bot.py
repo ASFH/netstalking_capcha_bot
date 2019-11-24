@@ -18,6 +18,8 @@ from config import config
 logging.basicConfig(level=config['loglevel'].get())
 LOG = logging.getLogger(__name__)
 
+LOG.info(config['chats'].get())
+
 # setup databases
 MSG_CONN = sqlite3.connect(config['db']['messages'].get(str), check_same_thread=False)
 
@@ -115,7 +117,9 @@ def count_messages(chat=None, uid=None, content=None, period=None):
         users = count_users(period, chat)
         query = query + " user_id IN ({}) AND ".format(','.join([str(i) for i in users]))
     if chat:
-        query = query + "chat_id = {} AND ".format(chat)
+        chat_id = config['chats'].get().get(chat)
+        if chat_id:
+            query = query + "chat_id = {} AND ".format(chat)
     if content is not None:
         query = query + " content_type = '{}' AND ".format(content)
     query = query + " (msg_date BETWEEN ? AND ?) GROUP BY user_id"
@@ -278,8 +282,8 @@ def get_user_messages(message):
 
 
 if __name__ == "__main__":
-    for _chat in config['chats'].get():
-        if _chat['name'] == config['admins_from'].get():
-            for admin in BOT.get_chat_administrators(_chat['id']):
+    for c_name, c_id in config['chats'].get().items():
+        if c_name == config['admins_from'].get():
+            for admin in BOT.get_chat_administrators(c_id):
                 ADMINS.append(admin.user.id)
     BOT.polling()
