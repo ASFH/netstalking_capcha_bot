@@ -107,7 +107,7 @@ def count_messages(chat=None, uid=None, content=None, period=None):
     """
     users = []
     counts = []
-    query = "SELECT user_id, COUNT(*) FROM messages WHERE "
+    query = "SELECT user_id, COUNT(*) as msg_count FROM messages WHERE "
     if not period:
         period = config['graphs']['period'].get()
     if chat:
@@ -123,7 +123,7 @@ def count_messages(chat=None, uid=None, content=None, period=None):
         query = query + " user_id IN ({}) AND ".format(','.join([str(i) for i in users]))
     if content is not None:
         query = query + " content_type = '{}' AND ".format(content)
-    query = query + " (msg_date BETWEEN ? AND ?) GROUP BY user_id"
+    query = query + " (msg_date BETWEEN ? AND ?) ORDER BY msg_count DESC GROUP BY user_id"
     LOG.debug(query)
     MSG_DB.execute(query, (datetime.now() - timedelta(hours=int(period)), datetime.now()))
     result = MSG_DB.fetchall()
