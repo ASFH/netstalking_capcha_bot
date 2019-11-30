@@ -6,11 +6,11 @@ import re
 import time
 import logging
 import threading
+from threading import Lock
 from datetime import timedelta, datetime
 
 import sqlite3
 import telebot
-from tinydb import TinyDB, Query
 
 from data import Graph
 from config import config
@@ -20,23 +20,32 @@ LOG = logging.getLogger(__name__)
 
 LOG.debug(config['chats'].get())
 
+lock = Lock()
 # setup databases
 MSG_CONN = sqlite3.connect(config['db']['messages'].get(str), check_same_thread=False)
+MSG_DB = MSG_CONN.cursor()
 
-MSG_CONN.execute("""CREATE TABLE IF NOT EXISTS messages (
+
+MSG_DB.execute("""CREATE TABLE IF NOT EXISTS users (
+    user_id integer primary key,
+    username text,
+    first_name text,
+    last_name text
+)""")
+
+MSG_CONN.commit()
+
+MSG_DB.execute("""CREATE TABLE IF NOT EXISTS messages (
     chat_id integer,
     user_id integer,
     msg_id integer,
     msg_date date,
     content_type text,
-    content_data text
+    content_data text,
+    FOREIGN KEY(user_id) REFERENCES users(user_id)
 )""")
 
 MSG_CONN.commit()
-MSG_DB = MSG_CONN.cursor()
-
-USERS_DB = TinyDB(config['db']['users'].get())
-User = Query()  #pylint: disable=invalid-name
 
 
 UNSAFE_MESSAGES = {}
@@ -44,7 +53,6 @@ ADMINS = []
 
 # define bot
 BOT = telebot.TeleBot(config['token'].get())
-
 
 def get_message_content(message):  #pylint: disable=too-many-return-statements
     """
@@ -107,6 +115,20 @@ def count_messages(chat=None, uid=None, content=None, period=None):
     """
     users = []
     counts = []
+
+    MSG_DB.execute("SELECT messages.user_id, users.first_name FROM messages LEFT JOIN users ON users.user_id = messages.user_id")
+    user_list = MSG_DB.fetchall()
+    for i in user_list:
+        if i[1] is None:
+            chat_member = BOT.get_chat_member(config['chats'].get().get('ts'), i[0])
+            print("User {} does not exist in users table. Adding user.".format(chat_member.user.first_name))
+            MSG_DB.execute("INSERT INTO users VALUES(?, ?, ?, ?)", (
+                chat_member.user.id,
+                chat_member.user.username,
+                chat_member.user.first_name,
+                chat_member.user.last_name,
+            ))
+            MSG_CONN.commit()
     query = "SELECT user_id, COUNT(*) AS msg_count FROM messages WHERE "
     if not period:
         period = config['graphs']['period'].get()
@@ -157,14 +179,15 @@ def count(message):
     users, counts = count_messages(**kwargs)
     usernames = []
     for uid in users:
-        user = USERS_DB.search(User.user_id == uid)[0]
+        MSG_DB.execute("SELECT * FROM users WHERE user_id = {}".format(uid))
+        user = MSG_DB.fetchall()[0]
         name = None
-        if user['first_name']:
-            name = user['first_name']
-            if user['last_name']:
-                name += ' ' + user['last_name']
-        elif user['username']:
-            name = user['username']
+        if user[2]:
+            name = user[2]
+            if user[3]:
+                name += ' ' + user[3]
+        elif user[1]:
+            name = user[1]
         else:
             name = 'id' + str(uid)
         usernames.append(name)
@@ -213,8 +236,8 @@ def new_user(message):
                              "and please press the button within the specified time."
                              " The bots will be kicked. Thank you! ({2} sec)")
         return _captcha_text.format(user.first_name, user.id, config['captcha']['timeout'].get())
-
-    if not USERS_DB.search(User.user_id == message.from_user.id):
+    MSG_DB.execute("SELECT * FROM users WHERE user_id = {}".format(message.from_user.id))
+    if not MSG_DB.fetchall():
         if message.from_user.id not in UNSAFE_MESSAGES:
             UNSAFE_MESSAGES[message.from_user.id] = [message.message_id]
             msg_from_bot = BOT.send_message(
@@ -236,15 +259,15 @@ def answer(message):
         BOT.delete_message(message.message.chat.id, message.message.message_id)
         del UNSAFE_MESSAGES[message.from_user.id]
         LOG.debug(UNSAFE_MESSAGES)
-        USERS_DB.insert({
-            'user_id': message.from_user.id,
-            'username': message.from_user.username,
-            'first_name': message.from_user.first_name,
-            'last_name': message.from_user.last_name
-        })
-        LOG.info('User %s created', USERS_DB.search(
-            User.first_name == message.from_user.first_name
-        )[0]['first_name'])
+        MSG_DB.execute("INSERT INTO users VALUES(?, ?, ?, ?)", (
+            message.from_user.id, 
+            message.from_user.username,
+            message.from_user.first_name,
+            message.from_user.last_name
+        ))
+        MSG_CONN.commit()
+        MSG_DB.execute("SELECT * FROM users WHERE user_id = {}".format(message.from_user.id))
+        LOG.info('User %s created', MSG_DB.fetchall()[0][2])
     else:
         BOT.answer_callback_query(message.id, 'Активно только для нового пользователя')
 
@@ -270,7 +293,7 @@ def get_user_messages(message):
             BOT.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         else:
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
-
+    lock.acquire()
     MSG_DB.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", (
         message.chat.id,
         message.from_user.id,
@@ -279,8 +302,22 @@ def get_user_messages(message):
         message.content_type,
         get_message_content(message)
     ))
+    lock.release()
     MSG_CONN.commit()
-
+    
+    lock.acquire()
+    MSG_DB.execute("INSERT INTO users VALUES(?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username=(?), first_name=(?), last_name=(?)", (
+            message.from_user.id, 
+            message.from_user.username,
+            message.from_user.first_name,
+            message.from_user.last_name,
+            message.from_user.username,
+            message.from_user.first_name,
+            message.from_user.last_name
+        ))
+    lock.release()
+    MSG_CONN.commit()
+    
 
 if __name__ == "__main__":
     for c_name, c_id in config['chats'].get().items():
