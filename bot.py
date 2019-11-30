@@ -288,11 +288,6 @@ def get_user_messages(message):
         processes all new messages;
         removes those which exceed predefined LIMIT
     """
-    person = [(message.from_user.id, 
-            message.from_user.username,
-            message.from_user.first_name,
-            message.from_user.last_name)]
-
     if message.from_user.id in UNSAFE_MESSAGES:
         if len(UNSAFE_MESSAGES[message.from_user.id]) >= config['captcha']['msg_limit'].get():
             BOT.delete_message(chat_id=message.chat.id, message_id=message.message_id)
