@@ -122,11 +122,14 @@ def count_messages(chat=None, uid=None, content=None, period=None):
         if i[1] is None:
             chat_member = BOT.get_chat_member(config['chats'].get().get('ts'), i[0])
             print("User {} does not exist in users table. Adding user.".format(chat_member.user.first_name))
-            MSG_DB.execute("INSERT INTO users VALUES(?, ?, ?, ?)", (
+            MSG_DB.execute("INSERT INTO users VALUES(?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username=(?), first_name=(?), last_name=(?)", (
                 chat_member.user.id,
                 chat_member.user.username,
                 chat_member.user.first_name,
                 chat_member.user.last_name,
+                chat_member.user.username,
+                chat_member.user.first_name,
+                chat_member.user.last_name
             ))
             MSG_CONN.commit()
     query = "SELECT user_id, COUNT(*) AS msg_count FROM messages WHERE "
