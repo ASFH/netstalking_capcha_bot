@@ -7,16 +7,18 @@ import plotly.io as pio
 
 from config import config
 
+
 class Graph:
     """
         class for drawing graphs from user data
     """
+
     def __init__(self, users, counts):
         self.users = users
         self.counts = counts
 
-        if config['graphs']['orca']['remote'].get():
-            pio.orca.config.server_url = config['graphs']['orca']['url'].get()
+        if config["graphs"]["orca"]["remote"].get():
+            pio.orca.config.server_url = config["graphs"]["orca"]["url"].get()
 
     @staticmethod
     def _orca_draw(fig, to_path=None):
@@ -25,9 +27,9 @@ class Graph:
             to PNG format (which is hardcoded currently)
             returns image as bytes
         """
-        image_bytes = pio.to_image(fig, format='png', width=1200, height=900)
+        image_bytes = pio.to_image(fig, format="png", width=1200, height=900)
         if to_path:
-            with open(to_path, 'w+b') as to_f:
+            with open(to_path, "w+b") as to_f:
                 # see to_image, it has more params
                 to_f.write(image_bytes)
         return image_bytes
