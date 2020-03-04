@@ -26,6 +26,7 @@ LOG.debug(config["chats"].get())
 UNSAFE_MESSAGES = {}
 ADMINS = []
 
+
 # define bot
 BOT = telebot.TeleBot(config["token"].get())
 
@@ -227,6 +228,15 @@ def answer(message):
         del UNSAFE_MESSAGES[message.from_user.id]
         LOG.debug(UNSAFE_MESSAGES)
         User.from_message(message)
+        BOT.restrict_chat_member(
+            message.message.chat.id, 
+            message.from_user.id, 
+            datetime.now() + timedelta(days=10),
+            can_send_messages=True,
+            can_send_media_messages=False,
+            can_send_other_messages=False,
+            can_add_web_page_previews=False
+        )
     else:
         BOT.answer_callback_query(message.id, "Активно только для нового пользователя")
 
@@ -259,6 +269,8 @@ def get_user_messages(message):
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
     else:
         Message.from_message(message)
+    # Vahter 1.0
+    
 
 
 if __name__ == "__main__":
