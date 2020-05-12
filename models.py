@@ -7,7 +7,12 @@ from playhouse.sqliteq import SqliteQueueDatabase
 from config import config
 from utils import get_message_content
 
-db = SqliteQueueDatabase(database=config["db"]["messages"].get(str), thread_safe=True)
+db = SqliteQueueDatabase(database=config["db"]["messages"].get(str), thread_safe=True, pragmas={
+        'journal_mode': 'wal',
+        'cache_size': -1024 * 64,
+        'foreign_keys': 1
+    }
+)
 
 
 class BaseModel(peewee.Model):
@@ -39,14 +44,23 @@ class User(BaseModel):
             last_name=chat_member.user.last_name,
         )
 
+    def _repr(self, with_id=True):
+        _repr = str(self.uid) + " " if with_id else ""
+        if self.first_name:
+            if self.last_name:
+                return _repr + f"{self.first_name} {self.last_name}"
+            return _repr + self.first_name
+        if user.username:
+            return _repr + self.username
+        return self.id
+
 
 class Message(BaseModel):
     msg_id = peewee.IntegerField()
     user = peewee.ForeignKeyField(User, backref="messages")
     chat_id = peewee.IntegerField()
-    date = peewee.DateTimeField(default=datetime.now)
+    date = peewee.IntegerField()
     content_type = peewee.CharField()
-    content_data = peewee.CharField()
 
     @classmethod
     def from_message(cls, message):
@@ -59,6 +73,6 @@ class Message(BaseModel):
             msg_id=message.message_id,
             user=user,
             chat_id=message.chat.id,
+            date=message.date,
             content_type=message.content_type,
-            content_data=get_message_content(message),
         )

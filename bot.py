@@ -1,18 +1,12 @@
-﻿"""
-    entrypoint and main module with msg handlers
-"""
-
-import logging
-import re
-import threading
+﻿import threading
 import time
-from datetime import datetime, timedelta
+import logging
 
 import telebot
-from peewee import DoesNotExist, fn
+from peewee import DoesNotExist
+from telebot.apihelper import ApiException
 
 from config import config
-from data import Graph
 from models import Message, User, db
 
 db.create_tables([User, Message])
@@ -20,86 +14,15 @@ db.create_tables([User, Message])
 logging.basicConfig(level=config["loglevel"].get())
 LOG = logging.getLogger(__name__)
 
-LOG.debug(config["chats"].get())
-
-
-UNSAFE_MESSAGES = {}
-ADMINS = []
+UNSAFE_MESSAGES = dict()
+ADMINS = list()
+MESSAGES = dict()
 
 # define bot
-BOT = telebot.TeleBot(config["token"].get())
-
-
-def kick_user(message, msg_from_bot):
-    """
-        executes in separate thread;
-        kicks user and removes its messages after timeout if it didn't pass the exam
-    """
-    time.sleep(config["captcha"]["timeout"].get())
-    if message.from_user.id in UNSAFE_MESSAGES:
-
-        BOT.kick_chat_member(message.chat.id, message.from_user.id)
-        LOG.info("User %s kicked", message.from_user.first_name)
-        BOT.unban_chat_member(message.chat.id, message.from_user.id)
-
-        for msg_id in UNSAFE_MESSAGES[message.from_user.id]:
-            LOG.info("removing message %s from user %s", msg_id, message.from_user.id)
-            BOT.delete_message(chat_id=message.chat.id, message_id=msg_id)
-
-        BOT.delete_message(message.chat.id, msg_from_bot)
-        LOG.info("removing message %s from bot", msg_from_bot)
-        del UNSAFE_MESSAGES[message.from_user.id]
-
-
-def count_users(period, chat=None):
-    """
-        count users who have wrote in period
-    """
-    # distinct for unique values
-    query = (
-        Message.select(User.uid)
-        .join(User)
-        .where(
-            Message.date.between(
-                datetime.now() - timedelta(hours=int(period)), datetime.now()
-            )
-        )
-    )
-    if chat:
-        query = query.where(Message.chat_id == chat)
-    query = query.distinct()
-    return [message.user.uid for message in query]
-
-
-def count_messages(chat=None, uid=None, content=None, period=None):
-    """
-        composes query and returns message stats
-    """
-    query = Message.select(User, fn.COUNT(Message.msg_id).alias("msg_count")).join(User)
-    if not period:
-        period = config["graphs"]["period"].get()
-    if chat:
-        chat_id = config["chats"].get().get(chat)
-        if chat_id:
-            query = query.where(Message.chat_id == chat_id)
-            chat = chat_id
-    if uid:
-        users = [uid]
-        query = query.where(User.uid == uid)
-    else:
-        users = count_users(period, chat)
-        query = query.where(User.uid << users)
-    if content is not None:
-        query = query.where(Message.content_type == content)
-    query = query.where(
-        Message.date.between(
-            datetime.now() - timedelta(hours=int(period)), datetime.now()
-        )
-    )
-    query = query.group_by(User.uid)
-    query = query.order_by(fn.COUNT(Message.msg_id).desc())
-    LOG.debug(query)
-    return query
+bot = telebot.TeleBot(config["token"].get())
+messages_to_delete = []
+LOG_MESSAGES = False
+LOG_MESSAGES_CHATID = None
 
 
 def show_captcha_keyboard():
@@ -115,97 +38,64 @@ def show_captcha_keyboard():
     return keyboard
 
 
-@BOT.message_handler(commands=["count"])
-def count(message):
+def kick_user(message, msg_from_bot):
     """
-        sends counted messages and images from users as a graph
+        executes in separate thread;
+        kicks user and removes its messages after timeout if it didn't pass the exam
     """
-    kwargs = {
-        k: v
-        for k, v in [  # pylint: disable=unnecessary-comprehension
-            a.split("=")
-            for a in re.findall(r"((?:uid|chat|content|period)=[^\s]+)", message.text)
-        ]
-    }
-    usernames = []
-    counts = []
-    for row in count_messages(**kwargs):
-        name = "None"
-        if row.user.first_name:
-            name = row.user.first_name
-            if row.user.last_name:
-                name += " " + row.user.last_name
-        elif row.user.username:
-            name = row.user.username
+    LOG.info("Waiting for member %s to solve captcha", User.from_message(message)._repr())
+    time.sleep(config["captcha"]["timeout"].get())
+    if message.from_user.id in UNSAFE_MESSAGES:
+
+        bot.kick_chat_member(message.chat.id, message.from_user.id)
+        LOG.info("User %s kicked", User.from_message(message)._repr())
+        bot.unban_chat_member(message.chat.id, message.from_user.id)
+
+        for msg_id in UNSAFE_MESSAGES[message.from_user.id]:
+            LOG.info("removing message %s from user %s", msg_id, User.from_message(message)._repr())
+            bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
+
+        LOG.info("removing message %s from bot", msg_from_bot)
+        bot.delete_message(message.chat.id, msg_from_bot)
+        del UNSAFE_MESSAGES[message.from_user.id]
+
+
+def check_access(bot_function):
+
+    def a_wrapper_accepting_arguments(message):
+        LOG.info("Checking if %s is allowed to call %s", User.from_message(message)._repr(), getattr(bot_function, '__name__', repr(callable)))
+        if message.from_user.id in ADMINS:
+            bot_function(message)
         else:
-            name = "id_" + str(row.user.uid)
-        usernames.append(name)
-        counts.append(row.msg_count)
-    counted = Graph(usernames, counts)
-    BOT.send_photo(
-        message.from_user.id,
-        counted.get_stats(),
-        "Counted messages from chat: "
-        + (kwargs.get("chat") if "chat" in kwargs else "*"),
-    )
+            LOG.warning("Restricted")
+
+    return a_wrapper_accepting_arguments
 
 
-@BOT.message_handler(commands=["cleanup"])
-def cleanup_messages(message):
-    """
-        triggered manually, it cleanups all UNSAFE_MESSAGES
-    """
-    LOG.debug(UNSAFE_MESSAGES)
-    if message.from_user.id in ADMINS:
-        if UNSAFE_MESSAGES:
-            for uid, messages in UNSAFE_MESSAGES.items():
-                for msg_id in messages:
-                    LOG.info("removing message %s from user %s", msg_id, uid)
-                    BOT.delete_message(chat_id=message.chat.id, message_id=msg_id)
-        else:
-            BOT.send_message(chat_id=message.chat.id, text="Нечего чистить")
-    else:
-        if message.from_user.id in UNSAFE_MESSAGES:
-            if (
-                len(UNSAFE_MESSAGES[message.from_user.id])
-                >= config["captcha"]["msg_limit"].get()
-            ):
-                BOT.delete_message(
-                    chat_id=message.chat.id, message_id=message.message_id
-                )
-            else:
-                UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
-
-
-@BOT.message_handler(func=lambda m: True, content_types=["new_chat_members"])
+@bot.message_handler(func=lambda m: True, content_types=["new_chat_members"])
 def new_user(message):
     """
         sends notification message to each joined user and triggers `kick_user`
     """
-
+    LOG.info("Handling new chat member")
     def _gen_captcha_text(user):
-        if user.language_code == "ru":
-            _captcha_text = (
-                "[{0}](tg://user?id={1}), хоп-хей! Докажи, что ты не бот "
-                "и нажми, пожалуйста, кнопку в течение указанного времени."
-                " Боты будут кикнуты. Спасибо! ({2} sec)"
-            )
-        else:
-            _captcha_text = (
-                "[{0}](tg://user?id={1}), howdy-ho! Prove you're not a bot "
-                "and please press the button within the specified time."
-                " The bots will be kicked. Thank you! ({2} sec)"
-            )
+        _captcha_text = (
+            "[{0}](tg://user?id={1}), хоп-хей! Докажи, что ты не бот "
+            "и нажми, пожалуйста, кнопку в течение указанного времени."
+            " Боты будут кикнуты. Спасибо! ({2} sec)"
+        )
         return _captcha_text.format(
             user.first_name, user.id, config["captcha"]["timeout"].get()
         )
 
     try:
         user = User.select().where(User.uid == message.from_user.id).get()
+        LOG.info("Known member %s", User.from_message(message)._repr())
     except DoesNotExist:
+        LOG.info("Member with %s is unknown, sending captcha", User.from_message(message)._repr())
         if message.from_user.id not in UNSAFE_MESSAGES:
             UNSAFE_MESSAGES[message.from_user.id] = [message.message_id]
-            msg_from_bot = BOT.send_message(
+            msg_from_bot = bot.send_message(
                 message.chat.id,
                 _gen_captcha_text(message.from_user),
                 parse_mode="Markdown",
@@ -217,21 +107,67 @@ def new_user(message):
             thread.start()
 
 
-@BOT.callback_query_handler(func=lambda message: True)
+@bot.callback_query_handler(func=lambda message: True)
 def answer(message):
     """
         processes new messages; if correct answer was given, removes uid from UNSAFE_MESSAGES
     """
     if message.from_user.id in UNSAFE_MESSAGES and message.data == "robot":
-        BOT.delete_message(message.message.chat.id, message.message.message_id)
+        LOG.info("Member %s passed captcha", User.from_message(message)._repr())
+        bot.delete_message(message.message.chat.id, message.message.message_id)
         del UNSAFE_MESSAGES[message.from_user.id]
-        LOG.debug(UNSAFE_MESSAGES)
         User.from_message(message)
     else:
-        BOT.answer_callback_query(message.id, "Активно только для нового пользователя")
+        bot.answer_callback_query(message.id, "Активно только для нового пользователя")
 
 
-@BOT.message_handler(
+@bot.message_handler(commands=['start'])
+@check_access
+def some_start_handler(message):
+    global LOG_MESSAGES
+    global LOG_MESSAGES_CHATID
+    LOG.info("Handling /start command")
+    if LOG_MESSAGES:
+        LOG.warning("Already logging messages, declined")
+        bot.send_message(message.chat.id, f"Already logging messages in chat {LOG_MESSAGES_CHATID}")
+    else:
+        LOG.info("Logging enabled by %s (in chat %s)", User.from_message(message)._repr(), message.chat.id)
+        LOG_MESSAGES = True
+        LOG_MESSAGES_CHATID = message.chat.id
+
+
+@bot.message_handler(commands=['stop'])
+@check_access
+def some_stop_handler(message):
+    global LOG_MESSAGES
+    global LOG_MESSAGES_CHATID
+    global messages_to_delete
+    LOG.info("Handling /stop command")
+    if not LOG_MESSAGES:
+        LOG.warning("Not logging messages, declined")
+        bot.send_message(message.chat.id, "Not logging messages")
+    else:
+        LOG.info("Logging disabled by %s (in chat %s)", User.from_message(message)._repr(), message.chat.id)
+        LOG_MESSAGES = False
+        messages = Message.select().where((Message.date << messages_to_delete) & (Message.chat_id == config["chats"]["ts"].get()))
+
+        for message in messages:
+            LOG.info("Forwarding and removing message %s", message.msg_id)
+            bot.forward_message(config["chats"]["tv"].get(), config["chats"]["ts"].get(), message.msg_id)
+            bot.delete_message(config["chats"]["ts"].get(), message.msg_id)
+        LOG.info("Flushing messages_to_delete")
+        messages_to_delete = []
+
+
+
+@bot.message_handler(func=lambda m: LOG_MESSAGES == True and LOG_MESSAGES_CHATID == m.chat.id)
+def messages_to_delete_handler(message):
+    global messages_to_delete
+    messages_to_delete.append(message.forward_date)
+    LOG.info("message logged (total %s)", len(messages_to_delete))
+
+
+@bot.message_handler(
     content_types=[
         "text",
         "photo",
@@ -254,7 +190,7 @@ def get_user_messages(message):
             len(UNSAFE_MESSAGES[message.from_user.id])
             >= config["captcha"]["msg_limit"].get()
         ):
-            BOT.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+            bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         else:
             UNSAFE_MESSAGES[message.from_user.id].append(message.message_id)
     else:
@@ -264,15 +200,14 @@ def get_user_messages(message):
 if __name__ == "__main__":
     for c_name, c_id in config["chats"].get().items():
         if c_name == config["admins_from"].get():
-            for admin in BOT.get_chat_administrators(c_id):
+            for admin in bot.get_chat_administrators(c_id):
                 ADMINS.append(admin.user.id)
     try:
         while True:
             try:
-                BOT.polling(none_stop=True, timeout=60)
+                bot.polling(none_stop=True, timeout=60)
             except Exception as e:
-                logging.exception(e)
-                BOT.stop_polling()
+                bot.stop_polling()
                 time.sleep(10)
     except (KeyboardInterrupt, SystemExit):
         raise
