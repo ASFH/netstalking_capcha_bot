@@ -5,11 +5,5 @@ admins_from: ts
 captcha:
   timeout: 60
   msg_limit: 5
-graphs:
-  orca:
-    remote: true
-    url: http://localhost:9091
-  period: 1 # hours
 db:
-  users: users.json
   messages: messages.db
